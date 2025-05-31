@@ -1,0 +1,346 @@
+---
+description: Guidelines for implementing Next.js server actions
+globs: 
+alwaysApply: false
+---
+---
+description: Use next-safe-action when implementing server actions to ensure type safety, validation, and proper error handling
+globs: apps/web/utils/actions/**/*.{ts,js}
+tags: [server-actions, next, next-safe-action, mutations]
+priority: 2
+version: 1.0.0
+---
+
+# Server Actions
+
+## Context
+- When implementing data mutations (create, update, delete operations)
+- When handling form submissions
+- When executing server-side operations from client components
+- When requiring authenticated user context for operations
+
+## Requirements
+- **Prefer server actions over API routes** for all data mutations
+- Create server actions in dedicated files with the 'use server' directive
+- Use Zod for input validation in server actions
+- Structure server action files by feature or domain
+- Return typed responses with clear success/error patterns
+- Handle errors properly with structured error objects
+- Implement proper cache invalidation with `revalidatePath` or `revalidateTag`
+- Use Form actions with the action attribute where appropriate
+
+## Examples
+
+<example>
+File structure:
+```
+src/app/actions/
+├── story.ts             // Story-related server actions
+├── user.ts              // User-related server actions
+└── validation/          // Validation schemas
+    ├── story.ts         // Story validation schemas
+    └── user.ts          // User validation schemas
+```
+
+Validation file (src/app/actions/validation/story.ts):
+```typescript
+import { z } from "zod";
+
+export const storySchema = z.object({
+  title: z.string().min(3).max(100),
+  characterName: z.string().min(1).max(50),
+  profession: z.string().min(1),
+  primarySetting: z.string().min(1),
+  mood: z.string().optional(),
+  timePeriod: z.string().optional(),
+});
+
+export type StoryInput = z.infer<typeof storySchema>;
+```
+
+Server action file (src/app/actions/story.ts):
+```typescript
+"use server";
+
+import { db } from "@/lib/db";
+import { auth } from "@/lib/auth";
+import { revalidatePath } from "next/cache";
+import { storySchema } from "./validation/story";
+import { redirect } from "next/navigation";
+
+export async function createStory(formData: FormData) {
+  // Get authenticated user
+  const session = await auth();
+  if (!session?.user?.id) {
+    return { error: "Unauthorized" };
+  }
+
+  // Parse and validate input
+  const rawData = Object.fromEntries(formData.entries());
+  const validationResult = storySchema.safeParse(rawData);
+
+  if (!validationResult.success) {
+    return { 
+      error: "Validation failed",
+      fieldErrors: validationResult.error.flatten().fieldErrors
+    };
+  }
+
+  try {
+    // Create story in database
+    const story = await db.story.create({
+      data: {
+        ...validationResult.data,
+        userId: session.user.id,
+      },
+    });
+    
+    // Revalidate relevant paths
+    revalidatePath("/stories");
+    
+    return { success: true, story };
+  } catch (error) {
+    console.error("Failed to create story:", error);
+    return { error: "Failed to create story" };
+  }
+}
+
+// Form component usage:
+// <form action={createStory}>
+//   ...form fields
+// </form>
+```
+
+Client component with programmatic action invocation:
+```typescript
+'use client';
+
+import { createStory } from "@/app/actions/story";
+import { toast } from "sonner";
+import { useFormState } from "react-dom";
+
+const initialState = { message: null, errors: {} };
+
+const StoryForm = () => {
+  const [state, formAction] = useFormState(createStory, initialState);
+  
+  return (
+    <form action={formAction}>
+      {/* Form fields */}
+      <button type="submit">Create Story</button>
+      {state.error && <div className="text-red-500">{state.error}</div>}
+    </form>
+  );
+};
+```
+</example>
+
+<example>
+Progressive Enhancement with Server Actions:
+```typescript
+// src/app/actions/story.ts
+"use server";
+
+import { db } from "@/lib/db";
+import { getCurrentUser } from "@/lib/auth";
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+
+export async function deleteStory(formData: FormData) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  const storyId = formData.get("storyId") as string;
+  
+  if (!storyId) {
+    return { error: "Story ID is required" };
+  }
+
+  try {
+    // Verify ownership
+    const story = await db.story.findUnique({
+      where: { id: storyId },
+      select: { userId: true },
+    });
+
+    if (!story || story.userId !== user.id) {
+      return { error: "Unauthorized or story not found" };
+    }
+
+    // Delete story
+    await db.story.delete({ where: { id: storyId } });
+    
+    revalidatePath("/stories");
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to delete story:", error);
+    return { error: "Failed to delete story" };
+  }
+}
+```
+
+HTML Form with progressive enhancement:
+```tsx
+// This works even without JavaScript
+<form action={deleteStory}>
+  <input type="hidden" name="storyId" value={story.id} />
+  <button type="submit">Delete Story</button>
+</form>
+```
+
+JavaScript-enhanced version:
+```tsx
+'use client';
+
+import { deleteStory } from "@/app/actions/story";
+import { toast } from "sonner";
+import { useTransition } from "react";
+
+const DeleteStoryButton = ({ storyId }: { storyId: string }) => {
+  const [isPending, startTransition] = useTransition();
+  
+  const handleDelete = () => {
+    // Confirm before deleting
+    if (!confirm("Are you sure you want to delete this story?")) {
+      return;
+    }
+    
+    const formData = new FormData();
+    formData.append("storyId", storyId);
+    
+    startTransition(async () => {
+      const result = await deleteStory(formData);
+      
+      if (result.error) {
+        toast.error(result.error);
+      } else {
+        toast.success("Story deleted");
+      }
+    });
+  };
+  
+  return (
+    <button 
+      onClick={handleDelete} 
+      disabled={isPending}
+      className="text-red-500 hover:text-red-700"
+    >
+      {isPending ? "Deleting..." : "Delete Story"}
+    </button>
+  );
+};
+```
+</example>
+
+<example type="invalid">
+```typescript
+// DON'T use API routes for basic CRUD operations
+// src/app/api/story/[id]/route.ts - AVOID THIS APPROACH
+
+import { db } from "@/lib/db";
+import { getCurrentUser } from "@/lib/auth";
+import { NextResponse } from "next/server";
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
+  const user = await getCurrentUser();
+  
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  
+  const { id } = params;
+  
+  try {
+    // Check if user owns the story
+    const story = await db.story.findUnique({
+      where: { id },
+      select: { userId: true },
+    });
+    
+    if (!story) {
+      return NextResponse.json({ error: "Story not found" }, { status: 404 });
+    }
+    
+    if (story.userId !== user.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    
+    // Delete the story
+    await db.story.delete({ where: { id } });
+    
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting story:", error);
+    return NextResponse.json(
+      { error: "Failed to delete story" },
+      { status: 500 }
+    );
+  }
+}
+```
+
+Instead, use server actions as shown in the previous examples, which provide:
+- Progressive enhancement (works without JS)
+- Simpler client implementation
+- Better integration with form elements
+- Type safety with direct server function calls
+- Fewer network requests (no need for separate API endpoints)
+</example>
+
+## Implementation Notes
+
+### Error Handling Pattern
+Always return structured errors from server actions:
+
+```typescript
+// Good error handling pattern
+export async function updateStory(formData: FormData) {
+  try {
+    // Implementation
+    return { success: true, data: result };
+  } catch (error) {
+    console.error("Error:", error);
+    
+    if (error instanceof ZodError) {
+      return { 
+        success: false,
+        validationError: error.flatten().fieldErrors 
+      };
+    }
+    
+    if (error instanceof AuthorizationError) {
+      return { 
+        success: false,
+        authError: "You don't have permission to perform this action" 
+      };
+    }
+    
+    return { 
+      success: false,
+      error: "An unexpected error occurred" 
+    };
+  }
+}
+```
+
+### Cache Invalidation
+Remember to invalidate cache after mutations:
+
+```typescript
+// Revalidate specific paths
+revalidatePath("/stories");
+
+// Revalidate specific tags
+revalidateTag("stories");
+```
+
+### Security Considerations
+- Always validate user permissions on the server
+- Never trust client-side data
+- Sanitize all inputs to prevent SQL injection and XSS attacks
+- Use proper authentication checks in every server action
