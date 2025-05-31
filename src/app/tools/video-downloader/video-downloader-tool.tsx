@@ -108,7 +108,10 @@ export function VideoDownloaderTool() {
         // Trigger browser download
         const link = document.createElement('a');
         link.href = result.data.downloadUrl;
-        link.download = `${result.data.metadata.title || 'video'}.${format}`;
+        // The filename (including extension) is now set by the Content-Disposition header
+        // in the API route. The 'download' attribute here can suggest a name if the header is missing,
+        // or if the browser chooses to use it. It's good to keep it simple.
+        link.download = result.data.metadata.title || 'video';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -212,10 +215,13 @@ export function VideoDownloaderTool() {
                     <SelectContent>
                       <SelectItem value={VideoQuality.BEST}>Best Available</SelectItem>
                       <SelectItem value={VideoQuality.ULTRA_HD}>4K (2160p)</SelectItem>
+                      <SelectItem value={VideoQuality.Q_1440P}>2K (1440p)</SelectItem>
                       <SelectItem value={VideoQuality.FULL_HD}>Full HD (1080p)</SelectItem>
                       <SelectItem value={VideoQuality.HIGH}>HD (720p)</SelectItem>
                       <SelectItem value={VideoQuality.MEDIUM}>SD (480p)</SelectItem>
                       <SelectItem value={VideoQuality.LOW}>Low (360p)</SelectItem>
+                      <SelectItem value={VideoQuality.Q_240P}>Very Low (240p)</SelectItem>
+                      <SelectItem value={VideoQuality.WORST}>Worst Available</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

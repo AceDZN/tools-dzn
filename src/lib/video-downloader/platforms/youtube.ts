@@ -28,39 +28,82 @@ async function getYouTubeClient(): Promise<Innertube> {
  * Extracts YouTube video metadata
  */
 export async function getYouTubeVideoInfo(videoId: string): Promise<VideoMetadata> {
+  let video;
   try {
     const yt = await getYouTubeClient();
-    const video = await yt.getInfo(videoId);
-    const basicInfo = video.basic_info;
+    video = await yt.getInfo(videoId);
+  } catch (error: any) {
+    // Attempt to interpret youtubei.js errors
+    // This is speculative as youtubei.js error specifics might vary.
+    // Common issues are video not found, private, or unavailable.
+    console.error(`youtubei.js error for videoId ${videoId}:`, error.message);
+    if (error.message?.includes('private') || error.message?.includes('unavailable') || error.message?.includes('removed')) {
+      throw new Error('Video is private or unavailable.');
+    }
+    if (error.message?.includes('not found') || error.message?.includes('Invalid video id')) {
+      throw new Error('Video not found.');
+    }
+    // Fallback for other youtubei.js errors
+    throw new Error(`Failed to fetch video data from YouTube: ${error.message || 'Unknown error'}`);
+  }
+
+  if (!video) {
+    // This case should ideally be caught by the try-catch above, but as a safeguard:
+    throw new Error('Failed to retrieve video information from YouTube.');
+  }
+
+  const basicInfo = video.basic_info;
+
+  if (!basicInfo) {
+    throw new Error('Could not retrieve basic video information.');
+  }
     
-    // Get available qualities
+  // Get available qualities
     const qualities = new Set<VideoQuality>();
+
+    const qualityOrder: Record<VideoQuality, number> = {
+      [VideoQuality.Q_240P]: 0,
+      [VideoQuality.LOW]: 1, // 360p
+      [VideoQuality.MEDIUM]: 2, // 480p
+      [VideoQuality.HIGH]: 3, // 720p
+      [VideoQuality.FULL_HD]: 4, // 1080p
+      [VideoQuality.Q_1440P]: 5, // 1440p
+      [VideoQuality.ULTRA_HD]: 6, // 2160p
+      // BEST and WORST are not typically listed as specific resolutions
+      [VideoQuality.BEST]: 98,
+      [VideoQuality.WORST]: -1
+    };
+
+    const addQuality = (height?: number, qualityLabel?: string) => {
+      if (qualityLabel?.includes('2160p') || height === 2160) qualities.add(VideoQuality.ULTRA_HD);
+      else if (qualityLabel?.includes('1440p') || height === 1440) qualities.add(VideoQuality.Q_1440P);
+      else if (qualityLabel?.includes('1080p') || height === 1080) qualities.add(VideoQuality.FULL_HD);
+      else if (qualityLabel?.includes('720p') || height === 720) qualities.add(VideoQuality.HIGH);
+      else if (qualityLabel?.includes('480p') || height === 480) qualities.add(VideoQuality.MEDIUM);
+      else if (qualityLabel?.includes('360p') || height === 360) qualities.add(VideoQuality.LOW);
+      else if (qualityLabel?.includes('240p') || height === 240) qualities.add(VideoQuality.Q_240P);
+    };
+
+    // Process muxed streams
     video.streaming_data?.formats.forEach(format => {
-      const height = format.height;
-      if (height) {
-        switch (height) {
-          case 2160:
-            qualities.add(VideoQuality.ULTRA_HD);
-            break;
-          case 1080:
-            qualities.add(VideoQuality.FULL_HD);
-            break;
-          case 720:
-            qualities.add(VideoQuality.HIGH);
-            break;
-          case 480:
-            qualities.add(VideoQuality.MEDIUM);
-            break;
-          case 360:
-            qualities.add(VideoQuality.LOW);
-            break;
-        }
+      addQuality(format.height, format.quality_label);
+    });
+
+    // Process adaptive streams (video-only)
+    video.streaming_data?.adaptive_formats.forEach(format => {
+      if (format.mime_type?.includes('video')) { // Ensure it's a video format
+        addQuality(format.height, format.quality_label);
       }
+    });
+
+    const sortedQualities = Array.from(qualities).sort((a, b) => {
+      return (qualityOrder[a] ?? 99) - (qualityOrder[b] ?? 99);
     });
 
     // Ensure required fields are not undefined
     if (!basicInfo.title) {
-      throw new Error('Video title not found');
+      // This might indicate a bigger issue with the data retrieved or a restricted video
+      throw new Error('Video title is missing. The video might be restricted or unavailable.');
     }
 
     return {
@@ -69,12 +112,10 @@ export async function getYouTubeVideoInfo(videoId: string): Promise<VideoMetadat
       thumbnail: basicInfo.thumbnail?.[0]?.url,
       author: basicInfo.author || 'Unknown',
       uploadDate: undefined, // Remove publish_date as it's not available in basic_info
-      availableQualities: Array.from(qualities)
+      availableQualities: sortedQualities
     };
-  } catch (error) {
-    console.error('Error fetching YouTube video info:', error);
-    throw new Error(`Failed to fetch video information: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  // The outer try-catch is removed as specific errors are thrown from within.
+  // If getYouTubeClient() fails, that will propagate up.
 }
 
 /**
@@ -86,48 +127,29 @@ export async function getYouTubeVideoInfo(videoId: string): Promise<VideoMetadat
  */
 
 /**
- * Gets the download URL for a YouTube video
+ * Gets the metadata for a YouTube video.
+ * The actual download URL will be constructed by the server action
+ * pointing to /api/download-video.
  */
 export async function getYouTubeDownloadUrl(
   videoId: string, 
-  options: VideoDownloadOptions = {}
-): Promise<DownloadResult> {
+  options?: VideoDownloadOptions // Options might be used in the future for filtering metadata
+): Promise<VideoMetadata> { // Changed return type
   try {
-    const yt = await getYouTubeClient();
-    
-    // Fetch metadata first
+    // Fetch metadata
     const metadata = await getYouTubeVideoInfo(videoId);
-
-    // Map our quality enum to youtubei.js quality string
-    const quality = options.quality || VideoQuality.HIGH;
-    const format = options.format || VideoFormat.MP4;
-
-    // Get the download stream
-    const stream = await yt.download(videoId, {
-      type: 'video', // Get video+audio stream
-      quality: quality === VideoQuality.BEST ? 'best' : quality,
-      format: format.toLowerCase()
-    });
-
-    // Convert stream to blob URL or data URL that can be downloaded
-    const chunks: Uint8Array[] = [];
-    for await (const chunk of stream) {
-      chunks.push(chunk);
-    }
-    const blob = new Blob(chunks, { type: 'video/mp4' });
-    const url = URL.createObjectURL(blob);
-
-    return {
-      success: true,
-      videoUrl: url,
-      metadata
-    };
+    // Options like quality and format are not used here anymore to select a stream,
+    // but could be used in the future if we wanted to filter available qualities/formats
+    // in the metadata itself. For now, options are effectively unused here.
+    return metadata;
   } catch (error) {
-    console.error('Error getting YouTube download URL:', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to get download URL'
-    };
+    console.error('Error getting YouTube video metadata:', error);
+    // Re-throw the error to be handled by the caller (e.g., the server action)
+    // This ensures that the server action knows the operation failed.
+    if (error instanceof Error) {
+      throw new Error(`Failed to get video metadata: ${error.message}`);
+    }
+    throw new Error('Failed to get video metadata due to an unknown error');
   }
 }
 
@@ -136,25 +158,29 @@ export async function getYouTubeDownloadUrl(
  */
 export async function validateYouTubeVideo(videoId: string): Promise<{ valid: boolean; error?: string }> {
   try {
-    const yt = await getYouTubeClient();
-    const video = await yt.getInfo(videoId);
-    const basicInfo = video.basic_info;
+    // We can leverage getYouTubeVideoInfo to check for availability and basic info
+    // This avoids duplicating logic for error interpretation from yt.getInfo()
+    await getYouTubeVideoInfo(videoId);
     
-    // Check if video is private
-    if (basicInfo.is_private) {
-      return { valid: false, error: 'Video is private' };
-    }
+    // If getYouTubeVideoInfo didn't throw, we can proceed with other checks if needed.
+    // For now, if getYouTubeVideoInfo succeeds, we consider it valid for download planning.
+    // Specific format/stream validation happens later in the API route.
+    // The original checks for is_private and streaming_data are implicitly covered
+    // by getYouTubeVideoInfo's more robust error handling.
     
-    // Check if video has downloadable formats
-    if (!video.streaming_data?.formats.length) {
-      return { valid: false, error: 'No downloadable formats available' };
-    }
+    // Example of an additional check if needed:
+    // const yt = await getYouTubeClient();
+    // const video = await yt.getInfo(videoId); // Redundant if getYouTubeVideoInfo is called
+    // if (!video.streaming_data?.formats.length) {
+    //   return { valid: false, error: 'No downloadable formats available (streaming_data check)' };
+    // }
     
     return { valid: true };
-  } catch (error) {
+  } catch (error: any) {
+    // Catch errors thrown by getYouTubeVideoInfo or getYouTubeClient
     return { 
       valid: false, 
-      error: error instanceof Error ? error.message : 'Failed to validate video' 
+      error: error.message || 'Failed to validate video.'
     };
   }
 }

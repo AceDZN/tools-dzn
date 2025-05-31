@@ -67,39 +67,32 @@ export async function downloadVideo(request: VideoDownloadRequest): Promise<Vide
       };
     }
 
-    // Get download URL and metadata
-    const result = await getYouTubeDownloadUrl(videoInfo.videoId, request.options);
+    // Get video metadata
+    // getYouTubeDownloadUrl now returns VideoMetadata directly or throws an error
+    const metadata = await getYouTubeDownloadUrl(videoInfo.videoId, request.options);
+
+    // Construct the download URL for our API endpoint
+    const quality = request.options?.quality || 'highest'; // Default or from options
+    const format = request.options?.format || 'mp4'; // Default or from options
     
-    if (!result.success) {
-      return {
-        success: false,
-        error: result.error || 'Failed to get download URL'
-      };
-    }
+    const downloadUrl = `/api/download-video?videoId=${videoInfo.videoId}&quality=${quality}&format=${format}`;
 
     const responseMetadata: { title: string; duration?: number; thumbnail?: string; author?: string } = {
-      title: result.metadata?.title || 'Unknown Title'
+      title: metadata.title || 'Unknown Title',
+      duration: metadata.duration,
+      thumbnail: metadata.thumbnail,
+      author: metadata.author,
     };
 
-    if (result.metadata?.duration !== undefined) {
-      responseMetadata.duration = result.metadata.duration;
-    }
-    if (result.metadata?.thumbnail) {
-      responseMetadata.thumbnail = result.metadata.thumbnail;
-    }
-    if (result.metadata?.author) {
-      responseMetadata.author = result.metadata.author;
-    }
-    console.log('result', result);
     return {
       success: true,
       data: {
-        downloadUrl: result.videoUrl!,
+        downloadUrl: downloadUrl,
         metadata: responseMetadata
       }
     };
   } catch (error) {
-    console.error('Error downloading video:', error);
+    console.error('Error in downloadVideo action:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'An unexpected error occurred'
