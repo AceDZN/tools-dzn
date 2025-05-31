@@ -4,9 +4,13 @@ import {
   parseVideoUrl, 
   VideoPlatform, 
   VideoDownloadOptions,
+  VideoMetadata, // Import the main VideoMetadata type
   getYouTubeVideoInfo,
-  getYouTubeDownloadUrl,
-  validateYouTubeVideo 
+  // getYouTubeDownloadUrl, // We might not need this if getYouTubeVideoInfo provides enough
+  validateYouTubeVideo,
+  getTwitterVideoInfo,
+  validateTwitterVideo,
+  VideoQuality // For default quality
 } from '@/lib/video-downloader';
 
 export interface VideoDownloadRequest {
@@ -14,88 +18,105 @@ export interface VideoDownloadRequest {
   options?: VideoDownloadOptions;
 }
 
-export interface VideoDownloadResponse {
+// This response will now return the full VideoMetadata object as defined in types.ts
+export interface VideoRequestResponse { // Renamed for clarity (used by both actions)
   success: boolean;
   data?: {
-    downloadUrl: string;
-    metadata: {
-      title: string;
-      duration?: number;
-      thumbnail?: string;
-      author?: string;
-    };
+    downloadUrl?: string; // Optional, only for downloadVideo action
+    metadata: VideoMetadata;
   };
   error?: string;
+  errorDetails?: any; // For debugging
 }
+
 
 /**
  * Server action to download a video
  */
-export async function downloadVideo(request: VideoDownloadRequest): Promise<VideoDownloadResponse> {
+export async function downloadVideo(request: VideoDownloadRequest): Promise<VideoRequestResponse> {
   try {
-    // Parse and validate the URL
     const videoInfo = parseVideoUrl(request.url);
     
-    if (!videoInfo.isValid) {
+    if (!videoInfo.isValid || !videoInfo.videoId || !videoInfo.platform) {
       return {
         success: false,
-        error: videoInfo.error || 'Invalid video URL'
+        error: videoInfo.error || 'Invalid video URL or could not determine platform/ID.'
       };
     }
 
-    // Currently only YouTube is supported
-    if (videoInfo.platform !== VideoPlatform.YOUTUBE) {
-      return {
-        success: false,
-        error: `${videoInfo.platform} downloads are not yet supported. Currently only YouTube is available.`
-      };
+    let title = 'video';
+    let downloadUrl = '';
+    const quality = request.options?.quality || VideoQuality.BEST;
+    const format = request.options?.format || 'mp4'; // yt-dlp default, mp4 for twitter
+
+    switch (videoInfo.platform) {
+      case VideoPlatform.YOUTUBE:
+        const ytValidation = await validateYouTubeVideo(videoInfo.videoId);
+        if (!ytValidation.valid) {
+          return { success: false, error: ytValidation.error || 'YouTube video cannot be downloaded' };
+        }
+        // Fetch title for YouTube video
+        const ytMetadata = await getYouTubeVideoInfo(videoInfo.videoId);
+        title = ytMetadata.title || `youtube_video_${videoInfo.videoId}`;
+        downloadUrl = `/api/download-video/youtube?videoId=${videoInfo.videoId}&quality=${quality}&format=${format}`;
+        break;
+
+      case VideoPlatform.TWITTER:
+        const twitterValidation = await validateTwitterVideo(videoInfo.videoId);
+        if (!twitterValidation.valid) {
+          return { success: false, error: twitterValidation.error || 'Twitter video cannot be downloaded' };
+        }
+        // Fetch title for Twitter video
+        const twitterMetadata = await getTwitterVideoInfo(videoInfo.videoId);
+        if (twitterMetadata.error) {
+          // This case should ideally be caught by validateTwitterVideo, but as a fallback:
+          return { success: false, error: `Failed to get Twitter video metadata: ${twitterMetadata.error}` };
+        }
+        title = twitterMetadata.title || `twitter_video_${videoInfo.videoId}`;
+        // Twitter API route currently defaults to mp4 and handles quality mapping
+        downloadUrl = `/api/download-video/twitter?videoId=${videoInfo.videoId}&quality=${quality}&format=mp4`;
+        break;
+
+      default:
+        return {
+          success: false,
+          error: `${videoInfo.platform} downloads are not yet supported.`
+        };
     }
-
-    if (!videoInfo.videoId) {
-      return {
-        success: false,
-        error: 'Could not extract video ID from URL'
-      };
-    }
-
-    // Validate the YouTube video
-    const validation = await validateYouTubeVideo(videoInfo.videoId);
-    if (!validation.valid) {
-      return {
-        success: false,
-        error: validation.error || 'Video cannot be downloaded'
-      };
-    }
-
-    // Get video metadata
-    // getYouTubeDownloadUrl now returns VideoMetadata directly or throws an error
-    const metadata = await getYouTubeDownloadUrl(videoInfo.videoId, request.options);
-
-    // Construct the download URL for our API endpoint
-    const quality = request.options?.quality || 'highest'; // Default or from options
-    const format = request.options?.format || 'mp4'; // Default or from options
     
-    const downloadUrl = `/api/download-video?videoId=${videoInfo.videoId}&quality=${quality}&format=${format}`;
-
-    const responseMetadata: { title: string; duration?: number; thumbnail?: string; author?: string } = {
-      title: metadata.title || 'Unknown Title',
-      duration: metadata.duration,
-      thumbnail: metadata.thumbnail,
-      author: metadata.author,
+    // Return a minimal metadata for the download response, primarily for filename suggestion
+    // The full metadata is fetched by getVideoMetadata
+    const responseMetadata: Partial<VideoMetadata> = {
+      title: title,
+      platform: videoInfo.platform,
+      id: videoInfo.videoId
     };
 
     return {
       success: true,
       data: {
         downloadUrl: downloadUrl,
-        metadata: responseMetadata
+        metadata: responseMetadata as VideoMetadata // Cast as partial is fine for this response
       }
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error in downloadVideo action:', error);
+    // Ensure VideoMetadata with error is returned for consistency if needed by client
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'An unexpected error occurred'
+      error: error instanceof Error ? error.message : 'An unexpected error occurred',
+      errorDetails: error,
+      data: { // Provide metadata shell on error too
+        metadata: {
+          platform: videoInfo?.platform || VideoPlatform.UNKNOWN,
+          id: videoInfo?.videoId || '',
+          title: 'Error',
+          duration: 0,
+          qualities: [],
+          formats: [],
+          error: error instanceof Error ? error.message : 'An unexpected error occurred'
+        }
+      }
     };
   }
 }
@@ -103,55 +124,61 @@ export async function downloadVideo(request: VideoDownloadRequest): Promise<Vide
 /**
  * Server action to get video metadata without downloading
  */
-export async function getVideoMetadata(url: string): Promise<VideoDownloadResponse> {
+export async function getVideoMetadata(url: string): Promise<VideoRequestResponse> {
   try {
     const videoInfo = parseVideoUrl(url);
     
-    if (!videoInfo.isValid) {
+    if (!videoInfo.isValid || !videoInfo.videoId || !videoInfo.platform) {
       return {
         success: false,
-        error: videoInfo.error || 'Invalid video URL'
+        error: videoInfo.error || 'Invalid video URL or could not determine platform/ID.'
       };
     }
 
-    if (videoInfo.platform !== VideoPlatform.YOUTUBE) {
+    let metadata: VideoMetadata;
+
+    switch (videoInfo.platform) {
+      case VideoPlatform.YOUTUBE:
+        metadata = await getYouTubeVideoInfo(videoInfo.videoId);
+        // Assuming getYouTubeVideoInfo is updated to return VideoMetadata
+        // including qualities: VideoQuality[]
+        // If not, mapping from its formats would be needed here.
+        // For now, we'll rely on its structure matching VideoMetadata.
+        if (!metadata.qualities || metadata.qualities.length === 0) {
+          // Fallback or mock if YouTube qualities aren't readily available
+          // For a real implementation, ensure getYouTubeVideoInfo provides this.
+          console.warn(`YouTube video ${videoInfo.videoId} did not return specific qualities. Adding defaults.`);
+          // metadata.qualities = [VideoQuality.BEST, VideoQuality.HIGH, VideoQuality.MEDIUM, VideoQuality.LOW];
+        }
+        break;
+
+      case VideoPlatform.TWITTER:
+        metadata = await getTwitterVideoInfo(videoInfo.videoId);
+        // getTwitterVideoInfo already returns VideoMetadata with qualities: VideoQuality[]
+        break;
+
+      default:
+        return {
+          success: false,
+          error: `${videoInfo.platform} metadata retrieval is not yet supported.`
+        };
+    }
+
+    if (metadata.error) {
       return {
         success: false,
-        error: `${videoInfo.platform} is not yet supported`
+        error: metadata.error,
+        data: { metadata } // Return metadata even if it contains an error field
       };
-    }
-
-    if (!videoInfo.videoId) {
-      return {
-        success: false,
-        error: 'Could not extract video ID from URL'
-      };
-    }
-
-    const metadata = await getYouTubeVideoInfo(videoInfo.videoId);
-    
-    const responseMetadata: { title: string; duration?: number; thumbnail?: string; author?: string } = {
-      title: metadata.title || 'Unknown Title'
-    };
-
-    if (metadata.duration !== undefined) {
-      responseMetadata.duration = metadata.duration;
-    }
-    if (metadata.thumbnail) {
-      responseMetadata.thumbnail = metadata.thumbnail;
-    }
-    if (metadata.author) {
-      responseMetadata.author = metadata.author;
     }
     
     return {
       success: true,
       data: {
-        downloadUrl: '', // Not needed for metadata-only request
-        metadata: responseMetadata
+        metadata: metadata
       }
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error getting video metadata:', error);
     return {
       success: false,
