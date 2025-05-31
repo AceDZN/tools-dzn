@@ -16,6 +16,8 @@
 # next.js
 /.next/
 /out/
+.next
+.next/
 
 # production
 /build
@@ -45,10 +47,7 @@ next-env.d.ts
 logs
 *.log
 dev-debug.log
-# Dependency directories
-node_modules/
-# Environment variables
-.env
+
 # Editor directories and files
 .idea
 .vscode
@@ -57,7 +56,15 @@ node_modules/
 *.njsproj
 *.sln
 *.sw?
+
 # OS specific
+.DS_Store
+Thumbs.db
+
 # Task files
 tasks.json
-tasks/ 
+tasks/
+
+# Cache directories
+.cache/
+.turbo 
