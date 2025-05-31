@@ -50,6 +50,7 @@
     "sonner": "^2.0.3",
     "tailwind-merge": "^3.3.0",
     "youtubei.js": "^13.4.0",
+    "ytdlp-nodejs": "^2.3.0",
     "zod": "^3.25.42"
   },
   "devDependencies": {
