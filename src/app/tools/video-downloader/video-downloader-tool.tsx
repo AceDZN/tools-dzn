@@ -95,7 +95,7 @@ export function VideoDownloaderTool() {
     const videoInfo = parseVideoUrl(url); // Re-parse or use memoized version for latest check
 
     if (videoInfo.isValid && videoInfo.videoId) {
-      setDownloadState(prev => ({ ...prev, isMetadataLoading: true, error: undefined, success: false }));
+      setDownloadState((prev): DownloadState => ({ ...prev, isMetadataLoading: true, error: undefined, success: false }));
       setCurrentVideoMetadata(null);
       setCurrentAvailableQualities(null);
       setQuality(VideoQuality.BEST); // Reset quality
@@ -151,7 +151,7 @@ export function VideoDownloaderTool() {
       if (url.trim() !== '' && !videoInfo.isValid) { // Only show parsing error if URL is not empty
         setDownloadState(prev => ({ ...prev, error: videoInfo.error || 'Invalid or unsupported URL', isMetadataLoading: false, success: false }));
       } else {
-        setDownloadState(prev => ({ ...prev, error: undefined, isMetadataLoading: false, success: false  })); // Clear error if URL is empty
+        setDownloadState((prev): DownloadState => ({ ...prev, error: undefined, isMetadataLoading: false, success: false  })); // Clear error if URL is empty
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -182,7 +182,7 @@ export function VideoDownloaderTool() {
       return;
     }
 
-    setDownloadState(prev => ({ ...prev, isLoading: true, progress: 0, success: false, error: undefined }));
+    setDownloadState((prev): DownloadState => ({ ...prev, isLoading: true, progress: 0, success: false, error: undefined }));
 
     try {
       const result = await downloadVideo({
