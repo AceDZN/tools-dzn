@@ -95,51 +95,121 @@ export function VideoDownloaderTool() {
     }
 
     // Start download process
-    setDownloadState({ isLoading: true, progress: 0 });
+    setDownloadState({ isLoading: true, progress: 0, error: undefined, success: false });
 
     try {
-      // Call the server action
+      // 1. Call the server action to get the API download URL and metadata
       const result = await downloadVideo({
         url,
         options: { quality, format }
       });
 
-      if (result.success && result.data) {
-        // Trigger browser download
-        const link = document.createElement('a');
-        link.href = result.data.downloadUrl;
-        // The filename (including extension) is now set by the Content-Disposition header
-        // in the API route. The 'download' attribute here can suggest a name if the header is missing,
-        // or if the browser chooses to use it. It's good to keep it simple.
-        link.download = result.data.metadata.title || 'video';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-
-        setDownloadState({
-          isLoading: false,
-          progress: 100,
-          success: true,
-          downloadUrl: result.data.downloadUrl,
-          videoTitle: result.data.metadata.title
-        });
-        
-        // Reset after 5 seconds
-        setTimeout(() => {
-          setDownloadState({ isLoading: false, progress: 0 });
-        }, 5000);
-      } else {
+      if (!result.success || !result.data?.downloadUrl) {
         setDownloadState({
           isLoading: false,
           progress: 0,
-          error: result.error || 'Download failed. Please try again.',
+          error: result.error || 'Failed to get download information. Please try again.',
         });
+        return;
       }
-    } catch (error) {
+
+      // Update state to indicate preparation/fetching
+      setDownloadState(prev => ({ ...prev, progress: 25, error: undefined, success: false, videoTitle: result.data?.metadata?.title || 'video' }));
+
+      // 2. Use fetch to call our API endpoint
+      const downloadUrl = result.data.downloadUrl;
+      const response = await fetch(downloadUrl);
+
+      // 3. Handle Response
+      if (!response.ok) {
+        let errorMsg = `Failed to download video. Status: ${response.status}`;
+        try {
+          // Check if the API returned a JSON error response
+          const contentType = response.headers.get('Content-Type');
+          if (contentType?.includes('application/json')) {
+            const errorData = await response.json();
+            errorMsg = errorData.error || errorMsg;
+          } else {
+            // If not JSON, use the status text
+            errorMsg = response.statusText || errorMsg;
+          }
+        } catch (e) {
+          // Ignore parsing error, use the generic status message
+          console.error("Error parsing error response:", e);
+        }
+        setDownloadState({ isLoading: false, progress: 0, error: errorMsg });
+        return;
+      }
+
+      // Check content type for unexpected JSON response even with status 200
+      const contentType = response.headers.get('Content-Type');
+      if (contentType?.includes('application/json')) {
+          const errorData = await response.json();
+          setDownloadState({ isLoading: false, progress: 0, error: errorData.error || 'Received unexpected data from server.' });
+          return;
+      }
+
+      setDownloadState(prev => ({ ...prev, progress: 75, error: undefined })); // Indicate download in progress
+
+      // Extract Filename
+      const contentDisposition = response.headers.get('Content-Disposition');
+      let filename = 'video'; // Default
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1];
+        }
+      }
+      // Fallback if Content-Disposition didn't yield a good name
+      if (filename === 'video' && result.data?.metadata?.title) {
+         // The format here is the one selected by the user, which should match the downloaded file's actual format
+         // because the API route uses this format parameter to perform the download.
+        const fileExtension = filename.includes('.') ? filename.substring(filename.lastIndexOf('.') + 1) : format;
+        const titleWithoutExtension = result.data.metadata.title.replace(/\.[^/.]+$/, "");
+        filename = `${titleWithoutExtension}.${fileExtension}`;
+      }
+
+
+      // Stream to Blob
+      const blob = await response.blob();
+
+      // Create Object URL and Download
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = filename; // Use the extracted or constructed filename
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(objectUrl); // Clean up
+
+      setDownloadState({
+        isLoading: false,
+        progress: 100,
+        success: true,
+        videoTitle: result.data?.metadata?.title || 'video', // Keep for success message
+        error: undefined
+      });
+
+      // Reset after 5 seconds
+      setTimeout(() => {
+        setDownloadState({ isLoading: false, progress: 0, success: false, error: undefined });
+      }, 5000);
+
+    } catch (error: any) {
+      console.error('Download process error:', error);
+      let detailedError = 'An unexpected error occurred during download.';
+      if (error.message) {
+        detailedError = error.message;
+      }
+      // Check if it's a network error specifically
+      if (error instanceof TypeError && error.message === "Failed to fetch") {
+        detailedError = "Network error: Failed to connect to the server. Please check your internet connection.";
+      }
       setDownloadState({
         isLoading: false,
         progress: 0,
-        error: 'Download failed. Please try again.',
+        error: detailedError,
       });
     }
   };
@@ -284,11 +354,20 @@ export function VideoDownloaderTool() {
                 </div>
               )}
 
-              {/* Loading State */}
+              {/* Loading State & Progress */}
               {downloadState.isLoading && (
-                <div className="space-y-2">
-                  <div className="text-center text-sm text-muted-foreground">
-                    Getting video information and download link...
+                <div className="space-y-2 text-center">
+                  <div className="text-sm text-muted-foreground">
+                    {downloadState.progress < 25 && 'Initiating...'}
+                    {downloadState.progress >= 25 && downloadState.progress < 75 && `Preparing download for: ${downloadState.videoTitle || 'video'}...`}
+                    {downloadState.progress >= 75 && 'Downloading file...'}
+                  </div>
+                  {/* Basic progress bar - can be enhanced */}
+                  <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
+                    <div
+                      className="bg-primary h-2.5 rounded-full transition-all duration-300 ease-out"
+                      style={{ width: `${downloadState.progress}%` }}
+                    ></div>
                   </div>
                 </div>
               )}
