@@ -39,9 +39,28 @@ export async function GET(request: NextRequest) {
       // slugifiedTitle remains 'video'
     }
 
+    // Diagnostic logging: Get full video info for available formats
+    try {
+      const fullVideoInfo = await yt.getInfo(videoId); // Call getInfo()
+      console.log('Attempting download for videoId:', videoId, 'quality:', quality, 'format:', format);
+      // Ensure streaming_data and its properties are accessed safely
+      if (fullVideoInfo.streaming_data) {
+        console.log('Available muxed formats (yt.getInfo):', JSON.stringify(fullVideoInfo.streaming_data.formats || [], null, 2));
+        console.log('Available adaptive formats (yt.getInfo):', JSON.stringify(fullVideoInfo.streaming_data.adaptive_formats || [], null, 2));
+      } else {
+        console.log('No streaming_data available in fullVideoInfo for videoId:', videoId);
+      }
+    } catch (getInfoError: any) {
+      // Log the error and return a 500 response.
+      // This is a safeguard; ideally, issues with videoId should be caught earlier.
+      console.error(`Critical error: yt.getInfo failed for videoId ${videoId} in download route:`, getInfoError.message);
+      return NextResponse.json({ error: 'Failed to retrieve crucial video information before download.', details: getInfoError.message }, { status: 500 });
+    }
+    // End diagnostic logging
+
     const stream = await yt.download(videoId, {
-      quality: quality,
-      format: format,
+      quality: quality, // This should be the string value like '1080p', 'best', etc.
+      format: format, // This should be the string value like 'mp4', 'webm', etc.
       type: 'video+audio', // TODO: make this configurable, or determine best type
     });
 
@@ -72,11 +91,13 @@ export async function GET(request: NextRequest) {
     } else if (error.message?.includes('not found') || error.message?.includes('Invalid video id')) {
       errorMessage = 'The requested video was not found.';
       status = 404; // Not Found
-    } else if (error.message?.includes('Invalid download options') || error.message?.includes('No matching formats found')) {
-      errorMessage = `The requested quality or format is not available for this video. Details: ${error.message}`;
+    } else if (error.message?.includes('No matching formats found') || error.message?.includes('Invalid download options')) {
+      // More specific and user-friendly message for this common case
+      errorMessage = "The requested quality or format is not available for this video. Please try a different selection or 'Best Available'.";
       status = 400; // Bad Request
     } else if (error.message) {
-      errorMessage = error.message; // Use the error message from youtubei.js if available
+      // For other errors, use the message from youtubei.js if available
+      errorMessage = error.message;
     }
 
     return NextResponse.json({ error: errorMessage, details: error.message }, { status });

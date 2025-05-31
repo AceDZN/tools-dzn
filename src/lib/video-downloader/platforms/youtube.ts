@@ -74,25 +74,45 @@ export async function getYouTubeVideoInfo(videoId: string): Promise<VideoMetadat
       [VideoQuality.WORST]: -1
     };
 
-    const addQuality = (height?: number, qualityLabel?: string) => {
-      if (qualityLabel?.includes('2160p') || height === 2160) qualities.add(VideoQuality.ULTRA_HD);
-      else if (qualityLabel?.includes('1440p') || height === 1440) qualities.add(VideoQuality.Q_1440P);
-      else if (qualityLabel?.includes('1080p') || height === 1080) qualities.add(VideoQuality.FULL_HD);
-      else if (qualityLabel?.includes('720p') || height === 720) qualities.add(VideoQuality.HIGH);
-      else if (qualityLabel?.includes('480p') || height === 480) qualities.add(VideoQuality.MEDIUM);
-      else if (qualityLabel?.includes('360p') || height === 360) qualities.add(VideoQuality.LOW);
-      else if (qualityLabel?.includes('240p') || height === 240) qualities.add(VideoQuality.Q_240P);
+    // Type for format objects from youtubei.js (simplified)
+    type YoutubeiFormat = {
+      mime_type?: string;
+      height?: number;
+      quality_label?: string;
+      // other properties are not needed for this function
+    };
+
+    const addQuality = (formatDetail: YoutubeiFormat) => {
+      // Prioritize MP4 for available quality listing.
+      // For adaptive streams, this checks the video part. Audio is handled by yt.download.
+      // For muxed streams, this checks the overall container.
+      if (formatDetail.mime_type?.includes('mp4')) {
+        const height = formatDetail.height;
+        const qualityLabel = formatDetail.quality_label;
+
+        if (qualityLabel?.includes('2160p') || height === 2160) qualities.add(VideoQuality.ULTRA_HD);
+        else if (qualityLabel?.includes('1440p') || height === 1440) qualities.add(VideoQuality.Q_1440P);
+        else if (qualityLabel?.includes('1080p') || height === 1080) qualities.add(VideoQuality.FULL_HD);
+        else if (qualityLabel?.includes('720p') || height === 720) qualities.add(VideoQuality.HIGH);
+        else if (qualityLabel?.includes('480p') || height === 480) qualities.add(VideoQuality.MEDIUM);
+        else if (qualityLabel?.includes('360p') || height === 360) qualities.add(VideoQuality.LOW);
+        else if (qualityLabel?.includes('240p') || height === 240) qualities.add(VideoQuality.Q_240P);
+      }
+      // If not MP4, we could optionally add WebM or other qualities here if desired,
+      // but the current subtask focuses on MP4 friendliness.
+      // For example, to add WebM as well:
+      // else if (formatDetail.mime_type?.includes('webm')) { ... }
     };
 
     // Process muxed streams
-    video.streaming_data?.formats.forEach(format => {
-      addQuality(format.height, format.quality_label);
+    video.streaming_data?.formats.forEach(formatDetail => {
+      addQuality(formatDetail);
     });
 
     // Process adaptive streams (video-only)
-    video.streaming_data?.adaptive_formats.forEach(format => {
-      if (format.mime_type?.includes('video')) { // Ensure it's a video format
-        addQuality(format.height, format.quality_label);
+    video.streaming_data?.adaptive_formats.forEach(formatDetail => {
+      if (formatDetail.mime_type?.includes('video')) { // Ensure it's a video format
+        addQuality(formatDetail);
       }
     });
 
