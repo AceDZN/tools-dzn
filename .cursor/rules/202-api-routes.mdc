@@ -1,0 +1,92 @@
+---
+description: Guidelines for implementing GET API routes in Next.js
+globs: 
+alwaysApply: false
+---
+---
+description: Implement GET API routes with withAuth wrapper to ensure consistent authentication and type safety
+globs: src/app/api/**/*.ts
+tags: [api, next, routes, prisma]
+priority: 2
+version: 1.0.0
+---
+
+# GET API Route Guidelines
+
+## Context
+- When creating new API endpoints in Next.js App Router
+- When implementing data retrieval operations
+- When defining type interfaces for client-server communication
+- When handling authentication in API routes
+
+## Requirements
+- Always wrap route handlers with `withAuth` middleware for authentication and error handling
+- Export response type using `Awaited<ReturnType<typeof getData>>` pattern
+- Separate business logic into dedicated functions outside the handler
+- Use Prisma for all database operations
+- Return responses using `NextResponse.json()` from Next.js
+- No need for try/catch blocks as `withAuth` provides error handling
+- Extract authenticated data from `request.auth` object
+
+## Examples
+
+<example>
+```typescript
+import { NextResponse } from "next/server";
+import prisma from "@/utils/prisma";
+import { withAuth } from "@/utils/middleware";
+
+// Export type for client-side use with SWR
+export type GetExampleResponse = Awaited<ReturnType<typeof getData>>;
+
+export const GET = withAuth(async (request) => {
+  const emailAccountId = request.auth.emailAccountId;
+  
+  const result = await getData({ emailAccountId });
+  return NextResponse.json(result);
+});
+
+// Separate business logic for better testability
+async function getData({ emailAccountId }: { emailAccountId: string }) {
+  const items = await prisma.example.findMany({
+    where: { emailAccountId },
+  });
+  
+  return { items };
+}
+```
+Properly implements API route with withAuth wrapper, exported response type, and separate business logic function.
+</example>
+
+<example type="invalid">
+```typescript
+import { NextResponse } from "next/server";
+import prisma from "@/utils/prisma";
+
+// Missing type export for client
+export async function GET(request) {
+  try {
+    // Missing withAuth wrapper
+    const { searchParams } = new URL(request.url);
+    const email = searchParams.get("email");
+    
+    // Business logic mixed with route handler
+    const items = await prisma.example.findMany({
+      where: { email },
+    });
+    
+    return NextResponse.json({ items });
+  } catch (error) {
+    // Unnecessary try/catch (should use withAuth)
+    console.error(error);
+    return NextResponse.json(
+      { error: "Failed to fetch data" },
+      { status: 500 }
+    );
+  }
+}
+```
+Invalid: Missing withAuth wrapper, type export, and mixes business logic with route handler. Implements unnecessary try/catch instead of using withAuth's error handling.
+</example>
+
+See [201-data-fetching.mdc](mdc:.cursor/rules/201-data-fetching.mdc) for guidelines on how to consume these API routes from the client.

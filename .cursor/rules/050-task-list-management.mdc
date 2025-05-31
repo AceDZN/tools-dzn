@@ -1,0 +1,116 @@
+---
+description: Guidelines managing task lists to track project progress
+globs: 
+alwaysApply: false
+---
+---
+description: Create and maintain task lists in markdown files when implementing features to track project progress
+globs: *.md
+tags: [task-management, documentation, workflow]
+priority: 3
+version: 1.0.0
+---
+
+# Task List Management
+
+## Context
+- When implementing new features or components
+- When tracking progress on complex tasks
+- When documenting implementation plans
+- When collaborating with team members on project status
+
+## Requirements
+- Create task lists in markdown files at project root with descriptive names
+- Structure files with Completed, In Progress, and Future Tasks sections
+- Include Implementation Plan section with detailed approach
+- Maintain Relevant Files section listing modified files with descriptions
+- Mark tasks as completed by changing `[ ]` to `[x]`
+- Move completed tasks from In Progress to Completed section
+- Add new tasks as they are identified during implementation
+- Document architecture decisions and technical components
+- Update task lists after implementing significant components
+
+## Examples
+
+<example>
+```markdown
+# Chat Assistant Implementation
+
+A feature that provides AI-powered chat assistance to users.
+
+## Completed Tasks
+
+- [x] Set up project structure
+- [x] Configure environment variables
+- [x] Implement database schema
+
+## In Progress Tasks
+
+- [ ] Create API endpoints for data access
+- [ ] Build frontend chat interface
+
+## Future Tasks
+
+- [ ] Implement message history
+- [ ] Add typing indicators
+- [ ] Support file attachments
+
+## Implementation Plan
+
+The chat assistant will use a WebSocket connection for real-time communication.
+Messages will be stored in MongoDB with user session tracking.
+
+### Relevant Files
+
+- src/models/ChatMessage.ts - Database schema for chat messages ✅
+- src/services/ChatService.ts - Business logic for processing messages ✅
+- src/api/chat.ts - REST API endpoints for chat history
+- src/components/ChatInterface.tsx - Frontend UI components
+```
+Well-structured task list with clearly defined sections, completed tasks marked appropriately, and relevant files documented.
+</example>
+
+<example type="invalid">
+```markdown
+# Tasks
+
+- Set up project
+- Make database
+- Create API
+- Build UI
+- Fix bugs
+- Add features
+```
+Invalid: Lacks proper structure with no sections for tracking progress, no task checkbox format, missing implementation details, and no relevant files section.
+</example>
+
+<example>
+When implementing a task and updating the list:
+
+BEFORE:
+```markdown
+## In Progress Tasks
+
+- [ ] Implement database schema
+- [ ] Create API endpoints for data access
+
+## Completed Tasks
+
+- [x] Set up project structure
+- [x] Configure environment variables
+```
+
+AFTER:
+```markdown
+## In Progress Tasks
+
+- [ ] Create API endpoints for data access
+
+## Completed Tasks
+
+- [x] Set up project structure
+- [x] Configure environment variables
+- [x] Implement database schema
+```
+Correctly moves the completed task from In Progress to Completed section and marks it as done.
+</example>

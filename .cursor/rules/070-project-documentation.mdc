@@ -1,0 +1,45 @@
+---
+description: Project Documentation Guidelines
+globs: 
+alwaysApply: false
+---
+---
+description: Use documentation guidelines when creating or modifying project documentation to maintain consistent structure and organization
+globs: documentation/**/*.md
+tags: [documentation, markdown, guidelines, project]
+priority: 3
+version: 1.0.0
+---
+
+# Project Documentation Guidelines
+
+## Context
+- When creating new documentation, modifying existing docs, or understanding project documentation structure
+- All documentation must be in Markdown (.md) format within the `/documentation/` directory
+
+## Requirements
+- File Location: All documentation files MUST be in `/documentation/` directory
+- File Naming: Use descriptive kebab-case (e.g., `new-feature-guide.md`) without spaces or special characters
+- Format: Write all documentation in clear, concise Markdown
+- Structure: Use headings, lists, and code blocks appropriately to organize content
+- Linking: Link to other relevant docs using relative paths
+- Review: Have significant changes or new documents reviewed for clarity and accuracy
+
+## Examples
+
+<example>
+# User Authentication Flow
+
+This document outlines the steps involvuser authentication process...
+
+## 1. Login Request
+...
+
+File location: `/documentation/user-authentication-flow.md`
+</example>
+
+<example type="invalid">
+This is my new doc. It's not in markdown and the name is weird.
+
+File location: `docs/MyNewDoc.txt`
+</example>
