@@ -25,9 +25,11 @@ export enum VideoQuality {
   MEDIUM = '480p',
   HIGH = '720p',
   FULL_HD = '1080p',
-  ULTRA_HD = '2160p',
+  Q_1440P = '1440p', // Added for 2K
+  ULTRA_HD = '2160p', // 4K
   BEST = 'best',
-  WORST = 'worst'
+  WORST = 'worst',
+  Q_240P = '240p' // Added for lower quality
 }
 
 export enum VideoFormat {
